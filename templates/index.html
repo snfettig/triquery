@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TriQuery - Multi-AI Search</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <header>
+            <div class="header-top">
+                <h1>TriQuery</h1>
+                <button id="history-toggle" onclick="toggleHistory()" title="Toggle history sidebar">History</button>
+            </div>
+            <form id="query-form">
+                <textarea id="query-input" placeholder="Ask anything..." rows="2"></textarea>
+                <button type="submit" id="send-btn">Send</button>
+            </form>
+        </header>
+
+        <div id="pane-controls">
+            <button onclick="resetPanes()" title="Equal size all panes">Equal</button>
+            <span class="separator">|</span>
+            <button onclick="focusPane('claude')" title="Focus Claude">Claude</button>
+            <button onclick="focusPane('chatgpt')" title="Focus ChatGPT">ChatGPT</button>
+            <button onclick="focusPane('grok')" title="Focus Grok">Grok</button>
+            <span class="separator">|</span>
+            <button onclick="togglePane('claude')" id="toggle-claude" title="Toggle Claude">Hide Claude</button>
+            <button onclick="togglePane('chatgpt')" id="toggle-chatgpt" title="Toggle ChatGPT">Hide ChatGPT</button>
+            <button onclick="togglePane('grok')" id="toggle-grok" title="Toggle Grok">Hide Grok</button>
+        </div>
+
+        <div id="main-area">
+        <aside id="history-sidebar" class="hidden">
+            <div class="history-header">
+                <span>History</span>
+            </div>
+            <div id="history-list"></div>
+        </aside>
+
+        <div id="panes-container">
+            <div class="pane" id="pane-claude" data-provider="claude">
+                <div class="pane-header">
+                    <span class="pane-title">Claude</span>
+                    <span class="pane-status" id="status-claude"></span>
+                </div>
+                <div class="pane-content" id="content-claude"></div>
+            </div>
+
+            <div class="divider" id="divider-1"></div>
+
+            <div class="pane" id="pane-chatgpt" data-provider="chatgpt">
+                <div class="pane-header">
+                    <span class="pane-title">ChatGPT</span>
+                    <span class="pane-status" id="status-chatgpt"></span>
+                </div>
+                <div class="pane-content" id="content-chatgpt"></div>
+            </div>
+
+            <div class="divider" id="divider-2"></div>
+
+            <div class="pane" id="pane-grok" data-provider="grok">
+                <div class="pane-header">
+                    <span class="pane-title">Grok</span>
+                    <span class="pane-status" id="status-grok"></span>
+                </div>
+                <div class="pane-content" id="content-grok"></div>
+            </div>
+        </div>
+        </div><!-- /main-area -->
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
