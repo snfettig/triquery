@@ -34,6 +34,7 @@ form.addEventListener('submit', async (e) => {
         document.getElementById(`content-${p}`).innerHTML =
             '<div class="streaming-cursor"></div>';
         document.getElementById(`status-${p}`).textContent = 'streaming...';
+        document.getElementById(`tokens-${p}`).textContent = '';
     });
 
     // Create a DB record for this query
@@ -89,6 +90,9 @@ async function streamFrom(provider, query, queryId) {
                             rawText[provider] += data.text;
                             renderMarkdown(provider);
                         }
+                        if (data.usage) {
+                            displayTokens(provider, data.usage);
+                        }
                     } catch {}
                 }
             }
@@ -125,6 +129,16 @@ function renderMarkdown(provider) {
     // Auto-scroll if near bottom
     if (isAtBottom) {
         contentEl.scrollTop = contentEl.scrollHeight;
+    }
+}
+
+// ---- Token display ----
+
+function displayTokens(provider, usage) {
+    const el = document.getElementById(`tokens-${provider}`);
+    if (usage && usage.input_tokens != null) {
+        const total = usage.input_tokens + usage.output_tokens;
+        el.textContent = `${usage.input_tokens} in / ${usage.output_tokens} out (${total} total)`;
     }
 }
 
@@ -182,6 +196,7 @@ async function loadHistoryEntry(id) {
             rawText[p] = data.responses[p] || '';
             const contentEl = document.getElementById(`content-${p}`);
             const statusEl = document.getElementById(`status-${p}`);
+            const tokensEl = document.getElementById(`tokens-${p}`);
             if (rawText[p]) {
                 contentEl.innerHTML = marked.parse(rawText[p]);
                 statusEl.textContent = 'done';
@@ -190,6 +205,12 @@ async function loadHistoryEntry(id) {
                 statusEl.textContent = '';
             }
             contentEl.classList.remove('streaming-cursor');
+            // Show saved token usage
+            if (data.usage && data.usage[p]) {
+                displayTokens(p, data.usage[p]);
+            } else {
+                tokensEl.textContent = '';
+            }
         });
 
         // Highlight active item
@@ -209,6 +230,7 @@ async function deleteHistoryEntry(id) {
                 document.getElementById(`content-${p}`).innerHTML =
                     '<div class="placeholder">Waiting for query...</div>';
                 document.getElementById(`status-${p}`).textContent = '';
+                document.getElementById(`tokens-${p}`).textContent = '';
             });
             input.value = '';
         }

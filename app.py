@@ -43,9 +43,20 @@ def init_db():
             query_id INTEGER NOT NULL,
             provider TEXT NOT NULL,
             content TEXT NOT NULL DEFAULT '',
+            input_tokens INTEGER,
+            output_tokens INTEGER,
             FOREIGN KEY (query_id) REFERENCES queries(id) ON DELETE CASCADE
         )
     """)
+    # Migrate existing tables that lack token columns
+    try:
+        db.execute("ALTER TABLE responses ADD COLUMN input_tokens INTEGER")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE responses ADD COLUMN output_tokens INTEGER")
+    except sqlite3.OperationalError:
+        pass
     db.execute("PRAGMA foreign_keys = ON")
     db.commit()
     db.close()
@@ -67,6 +78,7 @@ def index():
 
 
 def stream_claude(query, model="claude-sonnet-4-20250514"):
+    """Yields text chunks, then a dict with usage info as the final item."""
     try:
         with claude_client.messages.stream(
             model=model,
@@ -75,36 +87,42 @@ def stream_claude(query, model="claude-sonnet-4-20250514"):
         ) as stream:
             for text in stream.text_stream:
                 yield text
+            msg = stream.get_final_message()
+            yield {
+                "input_tokens": msg.usage.input_tokens,
+                "output_tokens": msg.usage.output_tokens,
+            }
+    except Exception as e:
+        yield f"\n\n[Error: {e}]"
+
+
+def _stream_openai_compat(client, query, model):
+    """Shared streaming logic for OpenAI-compatible APIs (ChatGPT, Grok)."""
+    try:
+        stream = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": query}],
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+            if chunk.usage:
+                yield {
+                    "input_tokens": chunk.usage.prompt_tokens,
+                    "output_tokens": chunk.usage.completion_tokens,
+                }
     except Exception as e:
         yield f"\n\n[Error: {e}]"
 
 
 def stream_chatgpt(query, model="gpt-4o"):
-    try:
-        stream = openai_client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": query}],
-            stream=True,
-        )
-        for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-    except Exception as e:
-        yield f"\n\n[Error: {e}]"
+    yield from _stream_openai_compat(openai_client, query, model)
 
 
 def stream_grok(query, model="grok-3"):
-    try:
-        stream = grok_client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": query}],
-            stream=True,
-        )
-        for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-    except Exception as e:
-        yield f"\n\n[Error: {e}]"
+    yield from _stream_openai_compat(grok_client, query, model)
 
 
 @app.route("/api/stream/<provider>", methods=["POST"])
@@ -127,17 +145,25 @@ def stream_response(provider):
 
     def generate():
         full_text = []
+        usage = None
         for chunk in gen_fn(query):
-            full_text.append(chunk)
-            yield f"data: {json.dumps({'text': chunk})}\n\n"
-        # Save completed response to DB
+            if isinstance(chunk, dict):
+                usage = chunk
+                yield f"data: {json.dumps({'usage': usage})}\n\n"
+            else:
+                full_text.append(chunk)
+                yield f"data: {json.dumps({'text': chunk})}\n\n"
+        # Save completed response and token usage to DB
         if query_id:
             try:
                 db = sqlite3.connect(DB_PATH)
                 db.execute("PRAGMA foreign_keys = ON")
+                input_tokens = usage["input_tokens"] if usage else None
+                output_tokens = usage["output_tokens"] if usage else None
                 db.execute(
-                    "UPDATE responses SET content = ? WHERE query_id = ? AND provider = ?",
-                    ("".join(full_text), query_id, provider),
+                    "UPDATE responses SET content = ?, input_tokens = ?, output_tokens = ? "
+                    "WHERE query_id = ? AND provider = ?",
+                    ("".join(full_text), input_tokens, output_tokens, query_id, provider),
                 )
                 db.commit()
                 db.close()
@@ -191,11 +217,19 @@ def get_history_entry(query_id):
     if not q:
         return {"error": "Not found"}, 404
     responses = db.execute(
-        "SELECT provider, content FROM responses WHERE query_id = ?", (query_id,)
+        "SELECT provider, content, input_tokens, output_tokens FROM responses WHERE query_id = ?",
+        (query_id,),
     ).fetchall()
     return jsonify({
         **dict(q),
         "responses": {r["provider"]: r["content"] for r in responses},
+        "usage": {
+            r["provider"]: {
+                "input_tokens": r["input_tokens"],
+                "output_tokens": r["output_tokens"],
+            }
+            for r in responses
+        },
     })
 
 
