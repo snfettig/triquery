@@ -452,6 +452,90 @@ header h1 {
     background: var(--surface);
 }
 
+/* Follow-up input */
+.pane-followup {
+    display: flex;
+    gap: 6px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+}
+
+.followup-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 6px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    resize: none;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.followup-input:focus {
+    border-color: var(--accent-claude);
+}
+
+.followup-btn {
+    padding: 6px 14px;
+    background: var(--bg);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    align-self: stretch;
+}
+
+.followup-btn:hover {
+    color: var(--text);
+    border-color: var(--text-muted);
+}
+
+.followup-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.pane.hidden .pane-followup {
+    display: none;
+}
+
+/* Conversation messages */
+.msg {
+    margin-bottom: 12px;
+}
+
+.msg-user {
+    background: color-mix(in srgb, var(--accent-claude) 8%, var(--bg));
+    border: 1px solid color-mix(in srgb, var(--accent-claude) 20%, var(--border));
+    border-radius: 8px;
+    padding: 10px 14px;
+}
+
+.msg-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.msg-assistant .msg-body {
+    padding: 0;
+}
+
+.msg-body > *:last-child {
+    margin-bottom: 0;
+}
+
 /* Dividers (drag handles) */
 .divider {
     width: 5px;

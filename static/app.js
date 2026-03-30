@@ -1,9 +1,11 @@
 // State
 const providers = ['claude', 'chatgpt', 'grok'];
-const rawText = { claude: '', chatgpt: '', grok: '' };
 const paneVisible = { claude: true, chatgpt: true, grok: true };
-let activeStreams = 0;
-let currentQueryId = null;
+// Per-provider conversation messages: array of {role, content}
+const conversation = { claude: [], chatgpt: [], grok: [] };
+// Track which providers are currently streaming
+const streaming = { claude: false, chatgpt: false, grok: false };
+let currentConversationId = null;
 let historyOpen = false;
 
 // Elements
@@ -11,7 +13,7 @@ const form = document.getElementById('query-form');
 const input = document.getElementById('query-input');
 const sendBtn = document.getElementById('send-btn');
 
-// Submit on Enter (Shift+Enter for newline)
+// Enter to submit on main input
 input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -19,53 +21,104 @@ input.addEventListener('keydown', (e) => {
     }
 });
 
-// Form submit
+// Enter to submit on follow-up inputs
+providers.forEach(p => {
+    document.getElementById(`followup-${p}`).addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendFollowup(p);
+        }
+    });
+});
+
+// ---- New conversation (send to all) ----
+
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const query = input.value.trim();
-    if (!query || activeStreams > 0) return;
+    if (!query || providers.some(p => streaming[p])) return;
 
-    sendBtn.disabled = true;
-    activeStreams = 3;
-
-    // Clear all panes
-    providers.forEach(p => {
-        rawText[p] = '';
-        document.getElementById(`content-${p}`).innerHTML =
-            '<div class="streaming-cursor"></div>';
-        document.getElementById(`status-${p}`).textContent = 'streaming...';
-        document.getElementById(`tokens-${p}`).textContent = '';
-    });
-
-    // Create a DB record for this query
+    // Create conversation on server
     try {
-        const res = await fetch('/api/query', {
+        const res = await fetch('/api/conversation', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query }),
         });
         const data = await res.json();
-        currentQueryId = data.query_id;
+        currentConversationId = data.conversation_id;
     } catch {
-        currentQueryId = null;
+        currentConversationId = null;
     }
 
-    // Fire all three streams concurrently
-    providers.forEach(p => streamFrom(p, query, currentQueryId));
+    // Reset conversation state and UI for all providers
+    providers.forEach(p => {
+        conversation[p] = [{ role: 'user', content: query }];
+        document.getElementById(`tokens-${p}`).textContent = '';
+    });
 
-    // Refresh history sidebar
+    // Stream all three
+    providers.forEach(p => streamProvider(p));
     loadHistory();
 });
 
-async function streamFrom(provider, query, queryId) {
+// ---- Follow-up (single provider or multiple) ----
+
+async function sendFollowup(provider) {
+    const inputEl = document.getElementById(`followup-${provider}`);
+    const query = inputEl.value.trim();
+    if (!query || streaming[provider] || !currentConversationId) return;
+    inputEl.value = '';
+
+    // Add user message to this provider's conversation
+    conversation[provider].push({ role: 'user', content: query });
+
+    // Save follow-up to DB
+    try {
+        await fetch(`/api/conversation/${currentConversationId}/followup`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, providers: [provider] }),
+        });
+    } catch {}
+
+    // Re-render to show the user message, then stream
+    renderConversation(provider);
+    document.getElementById(`tokens-${provider}`).textContent = '';
+    streamProvider(provider);
+}
+
+// ---- Streaming ----
+
+async function streamProvider(provider) {
     const contentEl = document.getElementById(`content-${provider}`);
     const statusEl = document.getElementById(`status-${provider}`);
+    const followupBtn = document.querySelector(`#pane-${provider} .followup-btn`);
 
+    streaming[provider] = true;
+    statusEl.textContent = 'streaming...';
+    followupBtn.disabled = true;
+    updateSendBtn();
+
+    // Render conversation so far + empty assistant slot
+    renderConversation(provider);
+
+    // Build messages array for the API
+    const apiMessages = conversation[provider].map(m => ({
+        role: m.role,
+        content: m.content,
+    }));
+
+    // Start streaming
+    let assistantText = '';
     try {
         const res = await fetch(`/api/stream/${provider}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, query_id: queryId }),
+            body: JSON.stringify({
+                conversation_id: currentConversationId,
+                messages: apiMessages,
+            }),
         });
 
         const reader = res.body.getReader();
@@ -78,7 +131,7 @@ async function streamFrom(provider, query, queryId) {
 
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
-            buffer = lines.pop(); // keep incomplete line
+            buffer = lines.pop();
 
             for (const line of lines) {
                 if (line.startsWith('data: ')) {
@@ -87,8 +140,8 @@ async function streamFrom(provider, query, queryId) {
                     try {
                         const data = JSON.parse(payload);
                         if (data.text) {
-                            rawText[provider] += data.text;
-                            renderMarkdown(provider);
+                            assistantText += data.text;
+                            renderConversation(provider, assistantText);
                         }
                         if (data.usage) {
                             displayTokens(provider, data.usage);
@@ -101,32 +154,44 @@ async function streamFrom(provider, query, queryId) {
         statusEl.textContent = 'done';
     } catch (err) {
         statusEl.textContent = 'error';
-        rawText[provider] += `\n\n[Connection error: ${err.message}]`;
-        renderMarkdown(provider);
+        assistantText += `\n\n[Connection error: ${err.message}]`;
+        renderConversation(provider, assistantText);
     }
 
-    activeStreams--;
-    if (activeStreams <= 0) {
-        sendBtn.disabled = false;
-        activeStreams = 0;
-    }
+    // Add completed assistant message to conversation
+    conversation[provider].push({ role: 'assistant', content: assistantText });
+    streaming[provider] = false;
+    followupBtn.disabled = false;
+    updateSendBtn();
+    renderConversation(provider);
 }
 
-function renderMarkdown(provider) {
+function updateSendBtn() {
+    sendBtn.disabled = providers.some(p => streaming[p]);
+}
+
+// ---- Rendering ----
+
+function renderConversation(provider, pendingAssistant) {
     const contentEl = document.getElementById(`content-${provider}`);
     const isAtBottom = contentEl.scrollHeight - contentEl.scrollTop - contentEl.clientHeight < 40;
 
-    contentEl.innerHTML = marked.parse(rawText[provider]);
-
-    // Add streaming cursor if still active
-    const statusEl = document.getElementById(`status-${provider}`);
-    if (statusEl.textContent === 'streaming...') {
-        contentEl.classList.add('streaming-cursor');
-    } else {
-        contentEl.classList.remove('streaming-cursor');
+    let html = '';
+    for (const msg of conversation[provider]) {
+        if (msg.role === 'user') {
+            html += `<div class="msg msg-user"><div class="msg-label">You</div><div class="msg-body">${marked.parse(msg.content)}</div></div>`;
+        } else {
+            html += `<div class="msg msg-assistant"><div class="msg-body">${marked.parse(msg.content)}</div></div>`;
+        }
     }
 
-    // Auto-scroll if near bottom
+    // Pending assistant response (still streaming)
+    if (pendingAssistant !== undefined) {
+        html += `<div class="msg msg-assistant streaming-cursor"><div class="msg-body">${marked.parse(pendingAssistant)}</div></div>`;
+    }
+
+    contentEl.innerHTML = html;
+
     if (isAtBottom) {
         contentEl.scrollTop = contentEl.scrollHeight;
     }
@@ -159,7 +224,7 @@ async function loadHistory() {
         const res = await fetch('/api/history');
         const items = await res.json();
         if (items.length === 0) {
-            listEl.innerHTML = '<div class="history-empty">No queries yet</div>';
+            listEl.innerHTML = '<div class="history-empty">No conversations yet</div>';
             return;
         }
         listEl.innerHTML = items.map(item => {
@@ -167,11 +232,11 @@ async function loadHistory() {
             const dateStr = date.toLocaleDateString(undefined, {
                 month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
             });
-            const isActive = item.id === currentQueryId ? ' active' : '';
+            const isActive = item.id === currentConversationId ? ' active' : '';
             return `
                 <div class="history-item${isActive}" data-id="${item.id}" onclick="loadHistoryEntry(${item.id})">
                     <div class="history-item-content">
-                        <div class="history-item-query">${escapeHtml(item.query)}</div>
+                        <div class="history-item-query">${escapeHtml(item.title)}</div>
                         <div class="history-item-date">${dateStr}</div>
                     </div>
                     <button class="history-delete-btn" onclick="event.stopPropagation(); deleteHistoryEntry(${item.id})" title="Delete">&#x2715;</button>
@@ -184,31 +249,36 @@ async function loadHistory() {
 }
 
 async function loadHistoryEntry(id) {
-    if (activeStreams > 0) return;
+    if (providers.some(p => streaming[p])) return;
 
     try {
         const res = await fetch(`/api/history/${id}`);
         const data = await res.json();
-        currentQueryId = data.id;
-        input.value = data.query;
+        currentConversationId = data.id;
+        input.value = '';
 
         providers.forEach(p => {
-            rawText[p] = data.responses[p] || '';
-            const contentEl = document.getElementById(`content-${p}`);
+            const msgs = data.messages[p] || [];
+            conversation[p] = msgs.map(m => ({ role: m.role, content: m.content }));
+            renderConversation(p);
+
             const statusEl = document.getElementById(`status-${p}`);
             const tokensEl = document.getElementById(`tokens-${p}`);
-            if (rawText[p]) {
-                contentEl.innerHTML = marked.parse(rawText[p]);
+
+            if (msgs.length > 0) {
                 statusEl.textContent = 'done';
+                // Show tokens from the last assistant message
+                const lastAssistant = [...msgs].reverse().find(m => m.role === 'assistant');
+                if (lastAssistant && lastAssistant.input_tokens != null) {
+                    displayTokens(p, {
+                        input_tokens: lastAssistant.input_tokens,
+                        output_tokens: lastAssistant.output_tokens,
+                    });
+                } else {
+                    tokensEl.textContent = '';
+                }
             } else {
-                contentEl.innerHTML = '<div class="placeholder">No response recorded</div>';
                 statusEl.textContent = '';
-            }
-            contentEl.classList.remove('streaming-cursor');
-            // Show saved token usage
-            if (data.usage && data.usage[p]) {
-                displayTokens(p, data.usage[p]);
-            } else {
                 tokensEl.textContent = '';
             }
         });
@@ -223,10 +293,10 @@ async function loadHistoryEntry(id) {
 async function deleteHistoryEntry(id) {
     try {
         await fetch(`/api/history/${id}`, { method: 'DELETE' });
-        if (currentQueryId === id) {
-            currentQueryId = null;
+        if (currentConversationId === id) {
+            currentConversationId = null;
             providers.forEach(p => {
-                rawText[p] = '';
+                conversation[p] = [];
                 document.getElementById(`content-${p}`).innerHTML =
                     '<div class="placeholder">Waiting for query...</div>';
                 document.getElementById(`status-${p}`).textContent = '';
@@ -267,7 +337,6 @@ function focusPane(target) {
             pane.classList.add('minimized');
             pane.classList.remove('focused');
         }
-        // Show all panes when focusing
         if (!paneVisible[p]) togglePane(p);
     });
     updateDividers();

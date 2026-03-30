@@ -15,8 +15,8 @@
                 <button id="history-toggle" onclick="toggleHistory()" title="Toggle history sidebar">History</button>
             </div>
             <form id="query-form">
-                <textarea id="query-input" placeholder="Ask anything..." rows="2"></textarea>
-                <button type="submit" id="send-btn">Send</button>
+                <textarea id="query-input" placeholder="Ask all three AIs..." rows="2"></textarea>
+                <button type="submit" id="send-btn">Send to All</button>
             </form>
         </header>
 
@@ -50,6 +50,10 @@
                     </div>
                 </div>
                 <div class="pane-content" id="content-claude"></div>
+                <div class="pane-followup">
+                    <textarea class="followup-input" id="followup-claude" placeholder="Follow up with Claude..." rows="1"></textarea>
+                    <button class="followup-btn" onclick="sendFollowup('claude')" title="Send follow-up">Send</button>
+                </div>
             </div>
 
             <div class="divider" id="divider-1"></div>
@@ -63,6 +67,10 @@
                     </div>
                 </div>
                 <div class="pane-content" id="content-chatgpt"></div>
+                <div class="pane-followup">
+                    <textarea class="followup-input" id="followup-chatgpt" placeholder="Follow up with ChatGPT..." rows="1"></textarea>
+                    <button class="followup-btn" onclick="sendFollowup('chatgpt')" title="Send follow-up">Send</button>
+                </div>
             </div>
 
             <div class="divider" id="divider-2"></div>
@@ -76,6 +84,10 @@
                     </div>
                 </div>
                 <div class="pane-content" id="content-grok"></div>
+                <div class="pane-followup">
+                    <textarea class="followup-input" id="followup-grok" placeholder="Follow up with Grok..." rows="1"></textarea>
+                    <button class="followup-btn" onclick="sendFollowup('grok')" title="Send follow-up">Send</button>
+                </div>
             </div>
         </div>
         </div><!-- /main-area -->
