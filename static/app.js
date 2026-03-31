@@ -9,7 +9,6 @@ let currentConversationId = null;
 let historyOpen = false;
 
 // Elements
-const form = document.getElementById('query-form');
 const input = document.getElementById('query-input');
 const sendBtn = document.getElementById('send-btn');
 
@@ -17,7 +16,7 @@ const sendBtn = document.getElementById('send-btn');
 input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        form.dispatchEvent(new Event('submit'));
+        submitQuery();
     }
 });
 
@@ -33,8 +32,9 @@ providers.forEach(p => {
 
 // ---- New conversation (send to all) ----
 
-form.addEventListener('submit', async (e) => {
-    e.preventDefault();
+sendBtn.addEventListener('click', () => submitQuery());
+
+async function submitQuery() {
     const query = input.value.trim();
     if (!query || providers.some(p => streaming[p])) return;
 
@@ -60,7 +60,7 @@ form.addEventListener('submit', async (e) => {
     // Stream all three
     providers.forEach(p => streamProvider(p));
     loadHistory();
-});
+}
 
 // ---- Follow-up (single provider or multiple) ----
 
@@ -90,8 +90,7 @@ async function sendFollowup(provider) {
 
 // ---- Streaming ----
 
-async function streamProvider(provider) {
-    const contentEl = document.getElementById(`content-${provider}`);
+function streamProvider(provider) {
     const statusEl = document.getElementById(`status-${provider}`);
     const followupBtn = document.querySelector(`#pane-${provider} .followup-btn`);
 
@@ -99,71 +98,78 @@ async function streamProvider(provider) {
     statusEl.textContent = 'streaming...';
     followupBtn.disabled = true;
     updateSendBtn();
-
-    // Render conversation so far + empty assistant slot
     renderConversation(provider);
 
-    // Build messages array for the API
     const apiMessages = conversation[provider].map(m => ({
         role: m.role,
         content: m.content,
     }));
 
-    // Start streaming
     let assistantText = '';
-    try {
-        const res = await fetch(`/api/stream/${provider}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                conversation_id: currentConversationId,
-                messages: apiMessages,
-            }),
-        });
+    let processed = 0;
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/stream/${provider}`);
+    xhr.setRequestHeader('Content-Type', 'application/json');
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop();
-
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const payload = line.slice(6);
-                    if (payload === '[DONE]') continue;
-                    try {
-                        const data = JSON.parse(payload);
-                        if (data.text) {
-                            assistantText += data.text;
-                            renderConversation(provider, assistantText);
-                        }
-                        if (data.usage) {
-                            displayTokens(provider, data.usage);
-                        }
-                    } catch {}
+    xhr.onprogress = function () {
+        const newData = xhr.responseText.substring(processed);
+        processed = xhr.responseText.length;
+        const lines = newData.split('\n');
+        for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const payload = line.slice(6);
+            if (payload === '[DONE]') continue;
+            try {
+                const data = JSON.parse(payload);
+                if (data.text) {
+                    assistantText += data.text;
+                    renderConversation(provider, assistantText);
                 }
-            }
+                if (data.usage) {
+                    displayTokens(provider, data.usage);
+                }
+            } catch {}
         }
+    };
 
-        statusEl.textContent = 'done';
-    } catch (err) {
+    xhr.onload = function () {
+        // Process any remaining data not caught by onprogress
+        if (processed < xhr.responseText.length) {
+            xhr.onprogress();
+        }
+        if (xhr.status >= 400) {
+            statusEl.textContent = 'error';
+            try {
+                const errData = JSON.parse(xhr.responseText);
+                assistantText += `\n\n[Error: ${errData.error || 'HTTP ' + xhr.status}]`;
+            } catch {
+                assistantText += `\n\n[Error: HTTP ${xhr.status}]`;
+            }
+        } else {
+            statusEl.textContent = 'done';
+        }
+        finishStream();
+    };
+
+    xhr.onerror = function () {
         statusEl.textContent = 'error';
-        assistantText += `\n\n[Connection error: ${err.message}]`;
-        renderConversation(provider, assistantText);
+        assistantText += '\n\n[Connection error]';
+        finishStream();
+    };
+
+    function finishStream() {
+        conversation[provider].push({ role: 'assistant', content: assistantText });
+        streaming[provider] = false;
+        followupBtn.disabled = false;
+        updateSendBtn();
+        renderConversation(provider);
     }
 
-    // Add completed assistant message to conversation
-    conversation[provider].push({ role: 'assistant', content: assistantText });
-    streaming[provider] = false;
-    followupBtn.disabled = false;
-    updateSendBtn();
-    renderConversation(provider);
+    xhr.send(JSON.stringify({
+        conversation_id: currentConversationId,
+        messages: apiMessages,
+    }));
 }
 
 function updateSendBtn() {

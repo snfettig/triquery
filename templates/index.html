@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TriQuery - Multi-AI Search</title>
     <link rel="stylesheet" href="/static/style.css">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="/static/marked.min.js"></script>
 </head>
 <body>
     <div id="app">
@@ -14,10 +14,10 @@
                 <h1>TriQuery</h1>
                 <button id="history-toggle" onclick="toggleHistory()" title="Toggle history sidebar">History</button>
             </div>
-            <form id="query-form">
+            <div id="query-form">
                 <textarea id="query-input" placeholder="Ask all three AIs..." rows="2"></textarea>
-                <button type="submit" id="send-btn">Send to All</button>
-            </form>
+                <button type="button" id="send-btn">Send to All</button>
+            </div>
         </header>
 
         <div id="pane-controls">
