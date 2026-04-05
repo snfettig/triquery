@@ -1,3 +1,10 @@
+// Configure marked to open links in new tabs
+const renderer = new marked.Renderer();
+renderer.link = function (token) {
+    return `<a href="${token.href}" target="_blank" rel="noopener noreferrer">${token.text}</a>`;
+};
+marked.setOptions({ renderer });
+
 // State
 const providers = ['claude', 'chatgpt', 'grok'];
 const paneVisible = { claude: true, chatgpt: true, grok: true };
